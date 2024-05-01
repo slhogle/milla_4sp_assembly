@@ -5,10 +5,12 @@ import pandas as pd
 # note: run source .venv/bin/activate in /home/shane/Documents/projects/method_dev/opentrons for
 # development
 
+# REMEMBER! to set offset for tube rack at 10 mm above the edge of the tube
+
 metadata = {
-    "protocolName": "Make pair mixes",
-    "description": """This protocol mixes 8 HAMBI species/evo histories into all possible pairs with
-                   each species either at 0.95 or 0.05 fraction""",
+    "protocolName": "Make Trios",
+    "description": """This protocol mixes 8 HAMBI species/evo histories into all possible trios with
+                   each species either starting at 0.90 and 0.05 fraction once""",
     "author": "Shane Hogle"
 }
 
@@ -124,15 +126,6 @@ T54,EVO_0403,ANC_1896,ANC_1977,0.05,0.05,0.9,H12
 trios_csv = pd.read_csv(StringIO(trios_csv_raw))
 trios_dict = trios_csv.set_index('well').to_dict(orient='index')
 
-# the order of the bacteria in the reservoir is very important! Here I have then in numerical
-# order with the ancestral species first.
-# A1 = ANC_0403, A2 = ANC_1287, A3 = ANC_1896, A4 = ANC_1977
-# A5 = EVO_0403, A6 = EVO_1287, A7 = EVO_1896, A8 = EVO_1977
-# It is also important that blank media is in A9
-
-strain_dict = {'ANC_0403': 'A1', 'ANC_1287': 'A2', 'ANC_1896': 'A3', 'ANC_1977': 'A4',
-               'EVO_0403': 'A5', 'EVO_1287': 'A6', 'EVO_1896': 'A7', 'EVO_1977': 'A8'}
-
 # Main body ####################################################################
 
 
@@ -143,7 +136,7 @@ def run(protocol: protocol_api.ProtocolContext):
     tips1000 = [protocol.load_labware("opentrons_96_tiprack_1000ul", rack, label="1000ul tips")
                 for rack in [9]]
     tips20 = [protocol.load_labware("opentrons_96_tiprack_20ul", rack, label="20ul tips")
-              for rack in [6, 7]]
+              for rack in [3, 6]]
 
     # IMPORTANT!!! CHANGE the position of the pipette (left/right) if necessary
     p1000_single = protocol.load_instrument(
@@ -162,34 +155,48 @@ def run(protocol: protocol_api.ProtocolContext):
                                            slot, label="Master Mix Plates")
                      for slot in [11]]
 
-    # Load the the bacteria reservoir at deck 1. This is the not the exact same model as in the
-    # opentrons labware library but it should work. This should have at least 5 ml in each well
+    # Load the the bacteria tubes at deck 10 (tuberackA) and deck 8 (tuberackB). Should have at least 10 ml in each tube
 
-    reservoir = protocol.load_labware("usascientific_12_reservoir_22ml", 8)
+    tuberackA = protocol.load_labware("opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", 10)
+    tuberackB = protocol.load_labware("opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", 8)
 
-    # this loop distribtues the 90% strain of each mixture. It uses one pipette tip to keep it fast
+    strain_dict = {'ANC_0403': tuberackA['A3'], 'ANC_1287': tuberackA['A4'], 'ANC_1896': tuberackA['B3'], 'ANC_1977': tuberackA['B4'],
+                   'EVO_0403': tuberackB['A3'], 'EVO_1287': tuberackB['A4'], 'EVO_1896': tuberackB['B3'], 'EVO_1977': tuberackB['B4']}
 
-    for sp, reswell in strain_dict.items():
-        sp90wells = []
+    #### this loop distribtues the 90% strain of each mixture. ####
+    #### It uses one pipette tip to keep it fast               ####
+
+    for sp, tube in strain_dict.items():
+        sp90wells = [] # get list of wells with 0.90 fractions
         for P, V in trios_dict.items():
             if (V['sp_A'] == sp and V['f_A'] == 0.90) or (V['sp_B'] == sp and V['f_B'] == 0.90) or (V['sp_C'] == sp and V['f_C'] == 0.90):
                 sp90wells.append(master_plates[0].wells_by_name()[P])
         p1000_single.distribute(volume=180,
-                                source=reservoir[reswell],
+                                source=tube,
                                 dest=sp90wells,
                                 mix_before=(1, 500),
                                 touch_tip=False,
+                                blow_out=False,
+                                blowout_location="source well",
+                                disposal_volume=0,
                                 air_gap=50,
                                 new_tip="once")
 
-    # this loop pipettes the 5% strain of each mixture. It uses a new pipette tip for each transfer
-    for sp, reswell in strain_dict.items():
-        sp05wells = []
+    #### this loop distribtues the 5% strain of each mixture. ####
+    #### It uses a new pipette tip for each transfer because  ####
+    #### it is dispensing into a bacterial culture            ####
+
+    for sp, tube in strain_dict.items():
+        sp05wells = []  # get list of wells with 0.05 fractions
         for P, V in trios_dict.items():
             if (V['sp_A'] == sp and V['f_A'] == 0.05) or (V['sp_B'] == sp and V['f_B'] == 0.05) or (V['sp_C'] == sp and V['f_C'] == 0.05):
                 sp05wells.append(master_plates[0].wells_by_name()[P])
         p20_single.transfer(volume=10,
-                            source=reservoir[reswell],
+                            source=tube,
                             dest=sp05wells,
-                            air_gap=5,
+                            touch_tip=False,
+                            blow_out=False,
+                            blowout_location="trash",
+                            disposal_volume=0,
+                            air_gap=1,
                             new_tip="always")
